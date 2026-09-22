@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "JP → 繁中 GPT Reader",
-  "version": "1.5.3",
-  "description": "反白或整篇日文小說，用 GPT 翻成繁中；支援 AO3 多章作品、glossary、Markdown/CSV 書庫、Reader、LAN 唯讀閱讀與 token/cost 統計。",
+  "version": "1.5.4",
+  "description": "日文推文快速直譯，或將小說翻成繁中並保存；支援 AO3 多章、glossary、Reader、LAN 唯讀閱讀與成本統計。",
   "permissions": [
     "contextMenus",
     "storage",

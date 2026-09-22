@@ -1,16 +1,26 @@
-# Yomika v1.5.3
+# Yomika v1.5.4
 
-一個本機優先（local-first）的 Chrome 擴充功能：把日文推文、小說或長篇文字交給 OpenAI API 翻成台灣繁體中文，並保存成 Markdown + CSV 書庫。
+一個本機優先（local-first）的 Chrome 擴充功能：用 OpenAI API 將日文推文、小說或長篇文字翻成台灣繁體中文。推文直譯只顯示結果；小說翻譯則會保存到本機書庫。
 
-> v1.5.1 重點：AO3 多章作品會依 `work` 歸在同一本書，Reader 提供章節切換；LAN Reader 改為 `.env` 明確開關，預設關閉。
+## 翻譯模式與保存規則
+
+| 功能 | 適合內容 | 是否保存到書庫 |
+| --- | --- | --- |
+| GPT 直譯成繁中 | 推文、短句、臨時查閱 | **不保存** |
+| GPT 小說模式翻成繁中 | 小段小說、需要保留的文章 | 保存 |
+| 翻譯選取的完整小說 | 長篇小說 | 保存 |
+| 翻譯本頁小說（實驗） | 可正確擷取正文的小說頁面 | 保存 |
+
+直譯仍會在 Side Panel 顯示本次 token 與估算成本，但不會建立作品、Markdown、`history.csv` 或 `usage.csv` 紀錄。
 
 ## 功能
 
-- 反白短文：小說翻譯 / 直譯。
+- 反白推文或短句直接翻譯，不污染書庫。
+- 小說模式翻譯會保存原文、譯文與來源資訊。
 - 選取整篇小說：自動切 chunk、逐段翻譯、顯示進度。
 - 實驗性「翻譯本頁小說」與 Side Panel 貼上全文。
 - `config/glossary.json` 固定角色名、性別提示、稱謂與專有名詞。
-- 本機保存 `original.md` / `translated.md` / `metadata.json` / `history.csv` / `usage.csv`。
+- 小說翻譯保存為 `original.md` / `translated.md` / `metadata.json`，並記錄 `history.csv` / `usage.csv`。
 - Reader：中文 / 日文 / 日中對照、深色模式、Token / 成本統計。
 - Reader 長標題會自動換行，書單標題最多顯示兩行，避免撐壞版面。
 - Reader 可勾選多篇作品後批次刪除，也可一鍵全選／取消全選。
@@ -54,7 +64,7 @@ Chrome 開啟 `chrome://extensions` → 開啟「開發人員模式」→「載�
 ### 短文
 
 - `Alt + T`：小說模式翻譯目前反白文字。
-- `Alt + Shift + T`：直譯目前反白文字。
+- `Alt + Shift + T`：直譯目前反白文字，**不保存到書庫**。
 - 或反白後使用右鍵選單。
 
 ### 長篇小說
@@ -227,14 +237,16 @@ git status
 
 ## Usage / 成本統計
 
-每次 Responses API 回傳的 usage 會寫入 `library/usage.csv`，並累計到作品 `metadata.json`。Reader 頂端會顯示累計 token 與估算成本。
+小說模式與長篇翻譯的 usage 會寫入 `library/usage.csv`，並累計到作品 `metadata.json`。Reader 頂端顯示的是書庫作品累計 token 與估算成本。
+
+直譯不進書庫，因此只在 Side Panel 顯示當次用量，不會納入 Reader 的累計數字。
 
 目前程式內的價格只是**本機估算值**，實際扣款永遠以 OpenAI Billing 為準；模型定價改變時請同步更新 `server/server.mjs` 的 `PRICING`。
 
-## 升級 v1.4.x → v1.5.1
+## 從舊版升級
 
 1. 備份原本資料夾（尤其 `.env`、`library/`、`config/glossary.json`）。
-2. 用 v1.5.1 程式檔覆蓋舊版。
+2. 用新版程式檔覆蓋舊版。
 3. **不要用 sample 覆蓋自己的 `.env` / glossary / library。**
 4. 在既有 `.env` 補上：
 
@@ -245,7 +257,7 @@ ENABLE_LAN_READER=false
 若你本來就要手機同 Wi-Fi Reader，改成 `true`。
 5. `npm install`（若 lockfile/依賴未變通常很快）。
 6. `npm start`。
-7. `chrome://extensions` 對擴充功能按重新載入，確認版本為 `1.5.3`。
+7. `chrome://extensions` 對擴充功能按重新載入，確認版本為 `1.5.4`。
 
 舊作品沒有 chapter metadata 時，Reader 會當作單章作品顯示，不需要先搬資料。
 
@@ -257,12 +269,13 @@ ENABLE_LAN_READER=false
 - 不建議直接把 8787 port 暴露到 Internet。
 - 本工具是個人 local-first 工具，不提供帳號、權限管理或公網部署防護。
 
+## Reader 書庫管理
 
-## Library management (v1.5.1)
+在「📚 Yomika 圖書館」中可以：
 
-The Reader is now branded **Yomika Library / Yomika 圖書館**. On localhost you can favorite works, delete an entire work, or delete the selected chapter of a multi-chapter work. Destructive actions require confirmation. LAN Reader remains read-only, so these controls cannot modify the library from another device.
+- 收藏作品。
+- 修改作品標題或章節標題。
+- 刪除單一章節或整篇作品。
+- 勾選多篇作品後批次刪除。
 
-
-## Rename titles (v1.5.2+)
-
-在「📚 Yomika 圖書館」中，本機可以使用「✏️ 改作品標題」修改書庫顯示名稱。多章作品選定章節後，也可以使用「✏️ 改章節標題」。修改只影響本機書庫顯示與 Markdown 標題，不會改變來源 URL、作品 ID 或 AO3 work/chapter 歸檔。LAN Reader 維持唯讀，因此手機同 Wi-Fi 閱讀時不能改名。
+修改標題只影響本機顯示與 Markdown 標題，不會改變來源 URL、作品 ID 或 AO3 歸檔。刪除前會再次確認；同 Wi-Fi 手機 Reader 維持唯讀，不能改名或刪除。

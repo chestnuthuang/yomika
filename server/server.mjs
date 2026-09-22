@@ -456,7 +456,11 @@ app.post("/translate", async (req,res) => {
       instructions:prompts[mode] + glossary, input:text
     });
     const translation = response.output_text ?? "";
-    const saved = await saveTranslation({ text, translation, mode, url, title, chapterTitle, usage:response.usage ?? {} });
+    // Direct mode is intended for disposable snippets such as social posts.
+    // Return the result and per-request usage, but do not add it to the reading library.
+    const saved = mode === "direct"
+      ? null
+      : await saveTranslation({ text, translation, mode, url, title, chapterTitle, usage:response.usage ?? {} });
     res.json({ translation, usage:normalizeUsage(response.usage ?? {}), saved });
   } catch (err) {
     console.error(err);
