@@ -42,7 +42,7 @@ function isLanReadOnlyRoute(req) {
 }
 app.use((req, res, next) => {
   if (isLoopbackRequest(req) || isLanReadOnlyRoute(req)) return next();
-  return res.status(403).json({ error: "This endpoint is available only from the computer running JP Reader." });
+  return res.status(403).json({ error: "This endpoint is available only from the computer running Yomika." });
 });
 
 async function loadGlossary() {
@@ -305,15 +305,134 @@ app.get("/api/library/:id",async(req,res)=>{ try{
   const os=parseSegments(o),ts=parseSegments(t); const tm=new Map(ts.map(x=>[x.id,x]));
   res.json({meta,segments:os.map(x=>({id:x.id,chapterId:x.chapterId||"main",original:x.text,translated:tm.get(x.id)?.text||tm.get(x.id)||""}))});
  }catch(e){res.status(404).json({error:e.message});} });
-app.get("/reader",(_req,res)=>res.type("html").send(`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JP Reader 書庫</title><style>
-body{margin:0;font-family:system-ui,-apple-system,"Noto Sans TC",sans-serif;background:#111210;color:#e8e6e1}header{position:sticky;top:0;background:#171816;border-bottom:1px solid #30312e;padding:14px 20px;display:flex;gap:12px;align-items:center;z-index:2;box-shadow:0 2px 12px rgba(0,0,0,.22)}header strong{font-size:18px;color:#f2f0eb}button,select{padding:8px 10px;border:1px solid #3b3d38;border-radius:8px;background:#242622;color:#e8e6e1}button:hover,select:hover{background:#2d2f2a;border-color:#555850}button:disabled{opacity:.45;cursor:not-allowed}.layout{display:grid;grid-template-columns:300px 1fr;min-height:calc(100vh - 60px)}aside{border-right:1px solid #30312e;background:#171816;padding:12px;overflow:auto}.work{padding:10px;border-radius:9px;cursor:pointer;color:#dedcd6}.work:hover,.work.active{background:#292b27}.work small{display:block;color:#9b9d96;margin-top:4px}.content{padding:28px;max-width:1100px}.title{font-size:26px;margin:0 0 6px;color:#f2f0eb}.url{font-size:12px;color:#9b9d96;word-break:break-all}.seg{margin:24px 0;padding-bottom:22px;border-bottom:1px solid #30312e;line-height:1.9;white-space:pre-wrap}.dual{display:grid;grid-template-columns:1fr 1fr;gap:28px}.jp{color:#b5b6b0}.zh{font-size:17px;color:#eeece7}a{color:#aebfd4}#usageStats{color:#a5a79f!important}@media(max-width:800px){.layout{grid-template-columns:1fr}aside{max-height:220px;border-right:0;border-bottom:1px solid #30312e}.dual{grid-template-columns:1fr}}
-</style></head><body><header><strong>📚 JP Reader 書庫</strong><select id="chapter"><option value="all">全部章節</option></select><select id="view"><option value="zh">只看中文</option><option value="dual">日中對照</option><option value="jp">只看日文</option></select><button id="source" disabled>開啟原始網頁</button><span id="usageStats" style="margin-left:auto;font-size:12px;color:#666">Usage 讀取中…</span></header><div class="layout"><aside id="list">讀取中…</aside><main class="content"><h1 class="title">選一篇作品</h1><div id="meta"></div><div id="body"></div></main></div><script>
-let current=null,data=null;const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function rewriteCsvWithoutWork(file, workId, segmentIds=null) {
+  try {
+    const raw = await fs.readFile(file, "utf8");
+    const lines = raw.split(/\r?\n/);
+    if (!lines.length) return;
+    const keep = [lines[0]];
+    for (const line of lines.slice(1)) {
+      if (!line.trim()) continue;
+      // CSV fields in our files are always quoted; work_id is the second column.
+      const cols = [...line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g)].map(m=>m[1].replaceAll('""','"'));
+      const seg = cols[0], wid = cols[1];
+      if (wid === workId && (!segmentIds || segmentIds.has(seg))) continue;
+      keep.push(line);
+    }
+    await fs.writeFile(file, keep.join("\n") + "\n", "utf8");
+  } catch (e) { if (e?.code !== "ENOENT") throw e; }
+}
+function markdownFromSegments(title, chapters, segments) {
+  let out = `# ${safeTitle(title)}\n\n`;
+  let last = null;
+  for (const seg of segments) {
+    const cid = seg.chapterId || "main";
+    if (cid !== last) {
+      last = cid;
+      const c = (chapters || []).find(x=>x.id===cid) || {id:cid,title:"全文",url:""};
+      out += `\n## ${safeTitle(c.title || "全文")}\n\n<!-- chapter:${cid} source:${c.url || ""} -->\n`;
+    }
+    out += `\n<!-- segment:${seg.id} chapter:${cid} -->\n\n${String(seg.text||"").trim()}\n`;
+  }
+  return out;
+}
+app.put("/api/library/:id/title", async (req,res)=>{ try {
+  const id=path.basename(req.params.id), dir=path.join(WORKS,id), mf=path.join(dir,"metadata.json");
+  const title=safeTitle(req.body?.title);
+  if (!String(req.body?.title ?? "").trim()) return res.status(400).json({error:"Title cannot be empty"});
+  const meta=JSON.parse(await fs.readFile(mf,"utf8"));
+  const [omd,tmd]=await Promise.all([fs.readFile(path.join(dir,"original.md"),"utf8"),fs.readFile(path.join(dir,"translated.md"),"utf8")]);
+  const os=parseSegments(omd), ts=parseSegments(tmd);
+  meta.title=title; meta.updatedAt=new Date().toISOString();
+  await Promise.all([
+    fs.writeFile(path.join(dir,"original.md"),markdownFromSegments(title,meta.chapters||[],os),"utf8"),
+    fs.writeFile(path.join(dir,"translated.md"),markdownFromSegments(title,meta.chapters||[],ts),"utf8"),
+    fs.writeFile(mf,JSON.stringify(meta,null,2),"utf8")
+  ]);
+  res.json({ok:true,title});
+} catch(e){res.status(404).json({error:e.message});} });
+app.put("/api/library/:id/chapters/:chapterId/title", async (req,res)=>{ try {
+  const id=path.basename(req.params.id), cid=path.basename(req.params.chapterId), dir=path.join(WORKS,id), mf=path.join(dir,"metadata.json");
+  const title=safeTitle(req.body?.title);
+  if (!String(req.body?.title ?? "").trim()) return res.status(400).json({error:"Title cannot be empty"});
+  const meta=JSON.parse(await fs.readFile(mf,"utf8"));
+  const chapters=Array.isArray(meta.chapters)?meta.chapters:[];
+  const chapter=chapters.find(c=>c.id===cid);
+  if(!chapter) return res.status(404).json({error:"Chapter not found"});
+  chapter.title=title; meta.updatedAt=new Date().toISOString();
+  const [omd,tmd]=await Promise.all([fs.readFile(path.join(dir,"original.md"),"utf8"),fs.readFile(path.join(dir,"translated.md"),"utf8")]);
+  const os=parseSegments(omd), ts=parseSegments(tmd);
+  await Promise.all([
+    fs.writeFile(path.join(dir,"original.md"),markdownFromSegments(meta.title,chapters,os),"utf8"),
+    fs.writeFile(path.join(dir,"translated.md"),markdownFromSegments(meta.title,chapters,ts),"utf8"),
+    fs.writeFile(mf,JSON.stringify(meta,null,2),"utf8")
+  ]);
+  res.json({ok:true,title});
+} catch(e){res.status(404).json({error:e.message});} });
+app.post("/api/library/:id/favorite", async (req,res)=>{ try {
+  const id=path.basename(req.params.id), dir=path.join(WORKS,id), mf=path.join(dir,"metadata.json");
+  const meta=JSON.parse(await fs.readFile(mf,"utf8")); meta.favorite=Boolean(req.body?.favorite); meta.updatedAt=new Date().toISOString();
+  await fs.writeFile(mf,JSON.stringify(meta,null,2),"utf8"); res.json({ok:true,favorite:meta.favorite});
+} catch(e){res.status(404).json({error:e.message});} });
+async function deleteWorkById(rawId) {
+  const id=path.basename(String(rawId||""));
+  if (!id || id !== String(rawId||"")) throw Object.assign(new Error("Invalid work id"),{code:"EINVAL"});
+  const dir=path.join(WORKS,id);
+  await fs.access(dir); await fs.rm(dir,{recursive:true,force:true});
+  await rewriteCsvWithoutWork(HISTORY,id); await rewriteCsvWithoutWork(USAGE,id);
+}
+app.delete("/api/library/batch", async (req,res)=>{ try {
+  const ids=[...new Set(Array.isArray(req.body?.ids)?req.body.ids.map(String):[])];
+  if (!ids.length) return res.status(400).json({error:"No works selected"});
+  if (ids.length>500) return res.status(400).json({error:"Too many works selected"});
+  const deleted=[], failed=[];
+  for (const id of ids) {
+    try { await deleteWorkById(id); deleted.push(id); }
+    catch(e) { failed.push({id,error:e.message}); }
+  }
+  res.status(failed.length?207:200).json({ok:!failed.length,deleted,failed});
+} catch(e){res.status(500).json({error:e.message});} });
+app.delete("/api/library/:id", async (req,res)=>{ try {
+  await deleteWorkById(req.params.id);
+  res.json({ok:true});
+} catch(e){res.status(404).json({error:e.message});} });
+app.delete("/api/library/:id/chapters/:chapterId", async (req,res)=>{ try {
+  const id=path.basename(req.params.id), cid=path.basename(req.params.chapterId), dir=path.join(WORKS,id), mf=path.join(dir,"metadata.json");
+  const meta=JSON.parse(await fs.readFile(mf,"utf8"));
+  const [omd,tmd]=await Promise.all([fs.readFile(path.join(dir,"original.md"),"utf8"),fs.readFile(path.join(dir,"translated.md"),"utf8")]);
+  const os=parseSegments(omd), ts=parseSegments(tmd); const removed=new Set(os.filter(x=>(x.chapterId||"main")===cid).map(x=>x.id));
+  if (!removed.size) return res.status(404).json({error:"Chapter not found"});
+  const remainO=os.filter(x=>!removed.has(x.id)), remainT=ts.filter(x=>!removed.has(x.id));
+  const chapters=(meta.chapters||[]).filter(c=>c.id!==cid);
+  if (!remainO.length) { await fs.rm(dir,{recursive:true,force:true}); await rewriteCsvWithoutWork(HISTORY,id); await rewriteCsvWithoutWork(USAGE,id); return res.json({ok:true,deletedWork:true}); }
+  await Promise.all([
+    fs.writeFile(path.join(dir,"original.md"),markdownFromSegments(meta.title,chapters,remainO),"utf8"),
+    fs.writeFile(path.join(dir,"translated.md"),markdownFromSegments(meta.title,chapters,remainT),"utf8")
+  ]);
+  meta.chapters=chapters; meta.segmentCount=remainO.length; meta.updatedAt=new Date().toISOString();
+  // Recompute usage from remaining usage.csv rows is intentionally omitted; usage is historical spend, not storage size.
+  await fs.writeFile(mf,JSON.stringify(meta,null,2),"utf8");
+  await rewriteCsvWithoutWork(HISTORY,id,removed);
+  res.json({ok:true,deletedWork:false});
+} catch(e){res.status(500).json({error:e.message});} });
+
+app.get("/reader",(_req,res)=>res.type("html").send(`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Yomika 圖書館</title><style>
+body{margin:0;font-family:system-ui,-apple-system,"Noto Sans TC",sans-serif;background:#111210;color:#e8e6e1}header{position:sticky;top:0;background:#171816;border-bottom:1px solid #30312e;padding:14px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;z-index:2;box-shadow:0 2px 12px rgba(0,0,0,.22)}header strong{font-size:18px;color:#f2f0eb}button,select{padding:8px 10px;border:1px solid #3b3d38;border-radius:8px;background:#242622;color:#e8e6e1}button:hover,select:hover{background:#2d2f2a;border-color:#555850}button:disabled{opacity:.45;cursor:not-allowed}.layout{display:grid;grid-template-columns:300px minmax(0,1fr);min-height:calc(100vh - 60px)}aside{border-right:1px solid #30312e;background:#171816;padding:12px;overflow:auto;min-width:0}.batchbar{display:flex;gap:6px;align-items:center;padding:0 0 10px;border-bottom:1px solid #30312e;margin-bottom:6px}.batchbar button{padding:6px 8px;font-size:12px}.batchbar span{font-size:12px;color:#a5a79f;margin-left:auto}.work{padding:10px;border-radius:9px;cursor:pointer;color:#dedcd6;display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start}.work:hover,.work.active{background:#292b27}.work input{margin-top:4px;accent-color:#aebfd4}.worktext{min-width:0}.work b{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;line-height:1.35}.work small{display:block;color:#9b9d96;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.content{padding:28px;max-width:1100px;min-width:0}.title{font-size:26px;margin:0 0 6px;color:#f2f0eb;overflow-wrap:anywhere;word-break:break-word;line-height:1.4}.content h2{overflow-wrap:anywhere;word-break:break-word}.url{font-size:12px;color:#9b9d96;word-break:break-all}.seg{margin:24px 0;padding-bottom:22px;border-bottom:1px solid #30312e;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}.dual{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px}.jp{color:#b5b6b0}.zh{font-size:17px;color:#eeece7}a{color:#aebfd4}#usageStats{color:#a5a79f!important}@media(max-width:800px){header{position:static}.layout{grid-template-columns:1fr}aside{max-height:260px;border-right:0;border-bottom:1px solid #30312e}.dual{grid-template-columns:1fr}.content{padding:20px}.title{font-size:22px}}
+</style></head><body><header><strong>📚 Yomika 圖書館</strong><select id="chapter"><option value="all">全部章節</option></select><select id="view"><option value="zh">只看中文</option><option value="dual">日中對照</option><option value="jp">只看日文</option></select><button id="source" disabled>開啟原始網頁</button><button id="editTitle" disabled>✏️ 改作品標題</button><button id="editChapter" disabled>✏️ 改章節標題</button><button id="favorite" disabled>☆ 收藏</button><button id="deleteChapter" disabled>刪除此章</button><button id="deleteWork" disabled>刪除作品</button><span id="usageStats" style="margin-left:auto;font-size:12px;color:#666">Usage 讀取中…</span></header><div class="layout"><aside><div class="batchbar"><button id="selectAll">全選</button><button id="batchDelete" disabled>刪除已選</button><span id="selectedCount">已選 0 篇</span></div><div id="list">讀取中…</div></aside><main class="content"><h1 class="title">選一篇作品</h1><div id="meta"></div><div id="body"></div></main></div><script>
+let current=null,data=null;const selectedWorks=new Set();const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 async function loadStats(){try{const j=await fetch('/api/usage-summary').then(r=>r.json());const u=j.total||{};document.querySelector('#usageStats').textContent='累計 '+Number(u.totalTokens||0).toLocaleString()+' tokens · 約 US$'+Number(u.estimatedCostUsd||0).toFixed(4);}catch{document.querySelector('#usageStats').textContent='Usage 無法讀取';}}
-async function loadList(){const j=await fetch('/api/library').then(r=>r.json());const l=document.querySelector('#list');l.innerHTML=j.works.length?'':'尚無翻譯紀錄';j.works.forEach(w=>{const d=document.createElement('div');d.className='work';d.innerHTML='<b>'+esc(w.title)+'</b><small>'+esc(w.updatedAt||'')+' · '+((w.chapters||[]).length||1)+' 章 · '+(w.segmentCount||0)+' 段</small>';d.onclick=()=>loadWork(w.workId,d);l.appendChild(d);});}
-async function loadWork(id,el){document.querySelectorAll('.work').forEach(x=>x.classList.remove('active'));el?.classList.add('active');data=await fetch('/api/library/'+encodeURIComponent(id)).then(r=>r.json());current=data.meta;document.querySelector('.title').textContent=current.title;document.querySelector('#meta').innerHTML='<div class="url">'+esc(current.url||'')+'</div>';document.querySelector('#source').disabled=!current.url;const cs=document.querySelector('#chapter');cs.innerHTML='<option value="all">全部章節</option>';const chapters=(current.chapters?.length?current.chapters:[{id:'main',title:'全文',url:current.url}]);chapters.forEach((c,i)=>{const o=document.createElement('option');o.value=c.id;o.textContent=(i+1)+'. '+(c.title||('Chapter '+(i+1)));cs.appendChild(o)});render();}
+function updateBatchUi(){const n=selectedWorks.size;document.querySelector('#selectedCount').textContent='已選 '+n+' 篇';document.querySelector('#batchDelete').disabled=!n;const boxes=[...document.querySelectorAll('.work input[type="checkbox"]')];document.querySelector('#selectAll').textContent=boxes.length&&boxes.every(x=>x.checked)?'取消全選':'全選';}
+async function loadList(){const j=await fetch('/api/library').then(r=>r.json());const valid=new Set(j.works.map(w=>w.workId));for(const id of selectedWorks)if(!valid.has(id))selectedWorks.delete(id);const l=document.querySelector('#list');l.innerHTML=j.works.length?'':'尚無翻譯紀錄';j.works.forEach(w=>{const d=document.createElement('div');d.className='work';d.dataset.id=w.workId;const cb=document.createElement('input');cb.type='checkbox';cb.checked=selectedWorks.has(w.workId);cb.setAttribute('aria-label','選取 '+w.title);cb.onclick=e=>e.stopPropagation();cb.onchange=()=>{cb.checked?selectedWorks.add(w.workId):selectedWorks.delete(w.workId);updateBatchUi();};const text=document.createElement('div');text.className='worktext';text.innerHTML='<b title="'+esc(w.title).replace(/"/g,'&quot;')+'">'+((w.favorite)?'★ ':'')+esc(w.title)+'</b><small>'+esc(w.updatedAt||'')+' · '+((w.chapters||[]).length||1)+' 章 · '+(w.segmentCount||0)+' 段</small>';d.append(cb,text);d.onclick=()=>loadWork(w.workId,d);l.appendChild(d);});updateBatchUi();}
+async function loadWork(id,el){document.querySelectorAll('.work').forEach(x=>x.classList.remove('active'));el?.classList.add('active');data=await fetch('/api/library/'+encodeURIComponent(id)).then(r=>r.json());current=data.meta;document.querySelector('.title').textContent=current.title;document.querySelector('#meta').innerHTML='<div class="url">'+esc(current.url||'')+'</div>';document.querySelector('#source').disabled=!current.url;document.querySelector('#editTitle').disabled=false;document.querySelector('#editChapter').disabled=true;document.querySelector('#favorite').disabled=false;document.querySelector('#favorite').textContent=current.favorite?'★ 已收藏':'☆ 收藏';document.querySelector('#deleteWork').disabled=false;const cs=document.querySelector('#chapter');cs.innerHTML='<option value="all">全部章節</option>';const chapters=(current.chapters?.length?current.chapters:[{id:'main',title:'全文',url:current.url}]);chapters.forEach((c,i)=>{const o=document.createElement('option');o.value=c.id;o.textContent=(i+1)+'. '+(c.title||('Chapter '+(i+1)));cs.appendChild(o)});render();}
 function render(){if(!data)return;const v=document.querySelector('#view').value;const ch=document.querySelector('#chapter').value;const b=document.querySelector('#body');b.innerHTML='';let lastChapter='';data.segments.filter(s=>ch==='all'||(s.chapterId||'main')===ch).forEach(s=>{if((s.chapterId||'main')!==lastChapter){lastChapter=s.chapterId||'main';const c=(current.chapters||[]).find(x=>x.id===lastChapter);if(c){const h=document.createElement('h2');h.textContent=c.title||'Chapter';h.style.marginTop='32px';b.appendChild(h);}}const e=document.createElement('section');e.className='seg';if(v==='dual')e.innerHTML='<div class="dual"><div class="jp">'+esc(s.original)+'</div><div class="zh">'+esc(s.translated)+'</div></div>';else if(v==='jp')e.innerHTML='<div class="jp">'+esc(s.original)+'</div>';else e.innerHTML='<div class="zh">'+esc(s.translated)+'</div>';b.appendChild(e);});}
-document.querySelector('#view').onchange=render;document.querySelector('#chapter').onchange=render;document.querySelector('#source').onclick=()=>{const ch=document.querySelector('#chapter').value;const c=(current?.chapters||[]).find(x=>x.id===ch);const url=c?.url||current?.url;if(url)open(url,'_blank')};loadStats();loadList();
+document.querySelector('#view').onchange=render;document.querySelector('#chapter').onchange=()=>{render();const selected=!current||document.querySelector('#chapter').value==='all';document.querySelector('#deleteChapter').disabled=selected;document.querySelector('#editChapter').disabled=selected;};document.querySelector('#source').onclick=()=>{const ch=document.querySelector('#chapter').value;const c=(current?.chapters||[]).find(x=>x.id===ch);const url=c?.url||current?.url;if(url)open(url,'_blank')};
+document.querySelector('#editTitle').onclick=async()=>{if(!current)return;const next=prompt('新的作品標題：',current.title||'');if(next===null)return;if(!next.trim())return alert('標題不能是空白');const r=await fetch('/api/library/'+encodeURIComponent(current.workId)+'/title',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:next.trim()})});if(!r.ok)return alert('更新標題失敗');current.title=next.trim();document.querySelector('.title').textContent=current.title;await loadList();};
+document.querySelector('#editChapter').onclick=async()=>{if(!current)return;const ch=document.querySelector('#chapter').value;if(ch==='all')return;const c=(current.chapters||[]).find(x=>x.id===ch);if(!c)return;const next=prompt('新的章節標題：',c.title||'');if(next===null)return;if(!next.trim())return alert('標題不能是空白');const r=await fetch('/api/library/'+encodeURIComponent(current.workId)+'/chapters/'+encodeURIComponent(ch)+'/title',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:next.trim()})});if(!r.ok)return alert('更新章節標題失敗');c.title=next.trim();const opt=document.querySelector('#chapter option[value="'+CSS.escape(ch)+'"]');if(opt){const idx=[...document.querySelector('#chapter').options].indexOf(opt);opt.textContent=idx+'. '+c.title;}render();};
+document.querySelector('#favorite').onclick=async()=>{if(!current)return;const next=!current.favorite;const r=await fetch('/api/library/'+encodeURIComponent(current.workId)+'/favorite',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({favorite:next})});if(!r.ok)return alert('收藏更新失敗');current.favorite=next;document.querySelector('#favorite').textContent=next?'★ 已收藏':'☆ 收藏';await loadList();};
+document.querySelector('#selectAll').onclick=()=>{const boxes=[...document.querySelectorAll('.work input[type="checkbox"]')];const all=boxes.length&&boxes.every(x=>x.checked);boxes.forEach(cb=>{cb.checked=!all;const id=cb.closest('.work')?.dataset.id;if(id){all?selectedWorks.delete(id):selectedWorks.add(id);}});updateBatchUi();};
+document.querySelector('#batchDelete').onclick=async()=>{const ids=[...selectedWorks];if(!ids.length)return;if(!confirm('確定要刪除已選取的 '+ids.length+' 篇作品嗎？\\n\\n這會刪除本機書庫中的原文、譯文與作品資料，無法復原。'))return;const btn=document.querySelector('#batchDelete');btn.disabled=true;btn.textContent='刪除中…';const r=await fetch('/api/library/batch',{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({ids})});let j={};try{j=await r.json();}catch{};(j.deleted||[]).forEach(id=>selectedWorks.delete(id));if(current&&(j.deleted||[]).includes(current.workId)){current=null;data=null;document.querySelector('.title').textContent='選一篇作品';document.querySelector('#meta').innerHTML='';document.querySelector('#body').innerHTML='';['favorite','editTitle','editChapter','deleteWork','deleteChapter','source'].forEach(id=>document.querySelector('#'+id).disabled=true);}btn.textContent='刪除已選';await loadList();await loadStats();if(!r.ok&&r.status!==207)alert('批次刪除失敗');else if(j.failed?.length)alert('已刪除 '+(j.deleted?.length||0)+' 篇，另有 '+j.failed.length+' 篇刪除失敗。');};
+document.querySelector('#deleteWork').onclick=async()=>{if(!current)return;if(!confirm('確定要刪除「'+current.title+'」嗎？\\n\\n這會刪除本機書庫中的原文、譯文與作品資料，無法復原。'))return;const r=await fetch('/api/library/'+encodeURIComponent(current.workId),{method:'DELETE'});if(!r.ok)return alert('刪除失敗');current=null;data=null;document.querySelector('.title').textContent='選一篇作品';document.querySelector('#meta').innerHTML='';document.querySelector('#body').innerHTML='';document.querySelector('#favorite').disabled=true;document.querySelector('#editTitle').disabled=true;document.querySelector('#editChapter').disabled=true;document.querySelector('#deleteWork').disabled=true;document.querySelector('#deleteChapter').disabled=true;await loadList();};
+document.querySelector('#deleteChapter').onclick=async()=>{if(!current)return;const ch=document.querySelector('#chapter').value;if(ch==='all')return;const c=(current.chapters||[]).find(x=>x.id===ch);if(!confirm('確定刪除「'+(c?.title||'此章')+'」嗎？\\n\\n只會刪除此章在本機書庫中的原文與譯文。'))return;const r=await fetch('/api/library/'+encodeURIComponent(current.workId)+'/chapters/'+encodeURIComponent(ch),{method:'DELETE'});if(!r.ok)return alert('刪除失敗');const j=await r.json();if(j.deletedWork){current=null;data=null;document.querySelector('.title').textContent='選一篇作品';document.querySelector('#body').innerHTML='';await loadList();}else{const active=document.querySelector('.work.active');await loadWork(current.workId,active);await loadList();}};loadStats();loadList();
 </script></body></html>`));
 
 app.get("/health", async (_req,res)=>{

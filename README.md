@@ -1,8 +1,8 @@
-# Yomika - JP → 繁中 GPT Reader v1.5.0
+# Yomika v1.5.3
 
 一個本機優先（local-first）的 Chrome 擴充功能：把日文推文、小說或長篇文字交給 OpenAI API 翻成台灣繁體中文，並保存成 Markdown + CSV 書庫。
 
-> v1.5.0 重點：AO3 多章作品會依 `work` 歸在同一本書，Reader 提供章節切換；LAN Reader 改為 `.env` 明確開關，預設關閉。
+> v1.5.1 重點：AO3 多章作品會依 `work` 歸在同一本書，Reader 提供章節切換；LAN Reader 改為 `.env` 明確開關，預設關閉。
 
 ## 功能
 
@@ -12,6 +12,8 @@
 - `config/glossary.json` 固定角色名、性別提示、稱謂與專有名詞。
 - 本機保存 `original.md` / `translated.md` / `metadata.json` / `history.csv` / `usage.csv`。
 - Reader：中文 / 日文 / 日中對照、深色模式、Token / 成本統計。
+- Reader 長標題會自動換行，書單標題最多顯示兩行，避免撐壞版面。
+- Reader 可勾選多篇作品後批次刪除，也可一鍵全選／取消全選。
 - AO3 多章：`/works/<work-id>/chapters/<chapter-id>` 自動歸到同一本作品，Reader 可切章。
 - 同 Wi-Fi 手機 Reader（可選）：只開放唯讀 Reader；翻譯端點仍限 localhost。
 - 舊版 v1.4.x 書庫仍可讀；沒有 chapter metadata 的舊作品會視為單章作品。
@@ -229,10 +231,10 @@ git status
 
 目前程式內的價格只是**本機估算值**，實際扣款永遠以 OpenAI Billing 為準；模型定價改變時請同步更新 `server/server.mjs` 的 `PRICING`。
 
-## 升級 v1.4.x → v1.5.0
+## 升級 v1.4.x → v1.5.1
 
 1. 備份原本資料夾（尤其 `.env`、`library/`、`config/glossary.json`）。
-2. 用 v1.5.0 程式檔覆蓋舊版。
+2. 用 v1.5.1 程式檔覆蓋舊版。
 3. **不要用 sample 覆蓋自己的 `.env` / glossary / library。**
 4. 在既有 `.env` 補上：
 
@@ -243,7 +245,7 @@ ENABLE_LAN_READER=false
 若你本來就要手機同 Wi-Fi Reader，改成 `true`。
 5. `npm install`（若 lockfile/依賴未變通常很快）。
 6. `npm start`。
-7. `chrome://extensions` 對擴充功能按重新載入，確認版本為 `1.5.0`。
+7. `chrome://extensions` 對擴充功能按重新載入，確認版本為 `1.5.3`。
 
 舊作品沒有 chapter metadata 時，Reader 會當作單章作品顯示，不需要先搬資料。
 
@@ -254,3 +256,13 @@ ENABLE_LAN_READER=false
 - LAN Reader 預設關閉；只有需要時才設 `ENABLE_LAN_READER=true`。
 - 不建議直接把 8787 port 暴露到 Internet。
 - 本工具是個人 local-first 工具，不提供帳號、權限管理或公網部署防護。
+
+
+## Library management (v1.5.1)
+
+The Reader is now branded **Yomika Library / Yomika 圖書館**. On localhost you can favorite works, delete an entire work, or delete the selected chapter of a multi-chapter work. Destructive actions require confirmation. LAN Reader remains read-only, so these controls cannot modify the library from another device.
+
+
+## Rename titles (v1.5.2+)
+
+在「📚 Yomika 圖書館」中，本機可以使用「✏️ 改作品標題」修改書庫顯示名稱。多章作品選定章節後，也可以使用「✏️ 改章節標題」。修改只影響本機書庫顯示與 Markdown 標題，不會改變來源 URL、作品 ID 或 AO3 work/chapter 歸檔。LAN Reader 維持唯讀，因此手機同 Wi-Fi 閱讀時不能改名。
