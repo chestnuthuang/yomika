@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "JP → 繁中 GPT Reader",
+  "version": "1.5.0",
+  "description": "反白或整篇日文小說，用 GPT 翻成繁中；支援 AO3 多章作品、glossary、Markdown/CSV 書庫、Reader、LAN 唯讀閱讀與 token/cost 統計。",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "sidePanel",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8787/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "JP → 繁中 GPT Reader"
+  },
+  "commands": {
+    "translate-novel": {
+      "suggested_key": {
+        "default": "Alt+T"
+      },
+      "description": "小說模式翻譯目前反白文字"
+    },
+    "translate-direct": {
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
+      "description": "直譯目前反白文字"
+    },
+    "translate-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "翻譯目前頁面的小說正文"
+    }
+  }
+}

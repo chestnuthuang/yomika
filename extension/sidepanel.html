@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="sidepanel.css"><title>GPT Reader</title></head><body>
+<header><div><strong>JP → 繁中</strong><small id="status">等待文字</small></div><button id="copy" class="secondary">複製</button></header>
+<div class="actions"><button id="page" class="secondary">🧪 翻譯本頁（實驗）</button><button id="reader" class="secondary">📚 我的書庫</button></div>
+<div class="tabs"><button data-mode="novel" class="active">小說</button><button data-mode="direct">直譯</button></div>
+<details class="pasteBox"><summary>貼上整篇小說</summary><div class="pasteInner"><textarea id="pasteText" placeholder="也可以直接把整篇日文貼在這裡。程式會自動分段翻譯。"></textarea><div class="pasteMeta"><span id="pasteCount">0 字</span><button id="pasteClear" class="ghost">清空</button><button id="pasteGo" class="primary">📖 翻譯整篇</button></div></div></details>
+<main><div id="progressWrap" class="progressWrap" hidden><div class="progressTop"><span id="progressText">準備中…</span><span id="progressNum"></span></div><progress id="progress" value="0" max="1"></progress></div>
+<section><div id="usage" class="usage"></div><label>翻譯</label><article id="translation" class="paper">短文：反白後按 Alt+T。長篇：整篇反白後右鍵選「📚 GPT 翻譯選取的完整小說」。</article></section>
+<details class="sourceDetails"><summary>查看原文</summary><article id="source" class="source"></article></details><div id="saved" class="saved"></div><div id="error"></div></main>
+<script src="sidepanel.js"></script></body></html>

@@ -1,0 +1,14 @@
+{
+  "name": "jp-translation-extension",
+  "version": "1.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "openai": "^5.0.0"
+  }
+}
